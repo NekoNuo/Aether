@@ -1,0 +1,125 @@
+name: Build Desktop App
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 0.1.0)'
+        required: false
+        default: '0.1.0'
+
+jobs:
+  generate-icons:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SVG conversion tools
+        run: sudo apt-get update && sudo apt-get install -y librsvg2-bin
+
+      - name: Convert SVG to PNG
+        run: rsvg-convert -w 1024 -h 1024 frontend/public/aether_adaptive.svg -o icon.png
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate Tauri icon set
+        run: npx @tauri-apps/cli@latest icon icon.png --output desktop/src-tauri/icons
+
+      - name: Upload icons artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-icons
+          path: desktop/src-tauri/icons/
+
+  build:
+    needs: generate-icons
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: '--target aarch64-apple-darwin'
+            rust_targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+          - platform: 'macos-latest'
+            args: '--target x86_64-apple-darwin'
+            rust_targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+          - platform: 'ubuntu-22.04'
+            args: ''
+            rust_targets: ''
+          - platform: 'windows-latest'
+            args: ''
+            rust_targets: ''
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download icons
+        uses: actions/download-artifact@v4
+        with:
+          name: app-icons
+          path: desktop/src-tauri/icons/
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install system dependencies (Ubuntu)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Update version in Tauri config
+        if: inputs.version != ''
+        shell: bash
+        run: |
+          cd desktop/src-tauri
+          # Update version in tauri.conf.json
+          node -e "
+            const fs = require('fs');
+            const conf = JSON.parse(fs.readFileSync('tauri.conf.json', 'utf8'));
+            conf.version = '${{ inputs.version }}';
+            fs.writeFileSync('tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
+          "
+          # Update version in Cargo.toml
+          sed -i.bak 's/^version = ".*"/version = "${{ inputs.version }}"/' Cargo.toml
+          rm -f Cargo.toml.bak
+
+      - name: Build desktop app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tauriScript: npx tauri
+          tagName: desktop-v__VERSION__
+          releaseName: 'Aether Desktop v__VERSION__'
+          releaseBody: |
+            Desktop application for Aether AI API Gateway.
+
+            **First launch:** Enter your Aether backend URL to connect.
+            **Change server:** Use the menu bar → Aether → Change Server URL.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

@@ -42,18 +42,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: 'macos-latest'
-            args: '--target aarch64-apple-darwin'
-            rust_targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
-          - platform: 'macos-latest'
-            args: '--target x86_64-apple-darwin'
-            rust_targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
-          - platform: 'ubuntu-22.04'
-            args: ''
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            rust_targets: 'aarch64-apple-darwin'
+            pyinstaller_name: aether-server
+            sidecar_name: aether-server-aarch64-apple-darwin
+          - platform: macos-13
+            target: x86_64-apple-darwin
+            rust_targets: 'x86_64-apple-darwin'
+            pyinstaller_name: aether-server
+            sidecar_name: aether-server-x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            target: ''
             rust_targets: ''
-          - platform: 'windows-latest'
-            args: ''
+            pyinstaller_name: aether-server
+            sidecar_name: aether-server-x86_64-unknown-linux-gnu
+          - platform: windows-latest
+            target: ''
             rust_targets: ''
+            pyinstaller_name: aether-server.exe
+            sidecar_name: aether-server-x86_64-pc-windows-msvc.exe
+
     runs-on: ${{ matrix.platform }}
 
     steps:
@@ -64,6 +73,64 @@ jobs:
         with:
           name: app-icons
           path: desktop/src-tauri/icons/
+
+      # ── Python: build backend with PyInstaller ──
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e ".[all]" 2>/dev/null || pip install -e .
+        shell: bash
+
+      - name: Build frontend for embedding
+        working-directory: frontend
+        run: |
+          npm ci
+          VITE_API_URL=http://127.0.0.1:8084 npm run build
+
+      - name: Build backend with PyInstaller
+        shell: bash
+        run: |
+          pyinstaller --onefile \
+            --name aether-server \
+            --add-data "src:src" \
+            --add-data "frontend/dist:frontend_dist" \
+            --collect-submodules uvicorn \
+            --collect-submodules sqlalchemy \
+            --collect-submodules pydantic \
+            --collect-submodules starlette \
+            --collect-submodules fastapi \
+            --collect-submodules httpx \
+            --collect-submodules asyncpg \
+            --collect-submodules cryptography \
+            --collect-submodules bcrypt \
+            --collect-submodules openai \
+            --collect-submodules loguru \
+            --collect-submodules apscheduler \
+            --collect-submodules prometheus_client \
+            --collect-submodules tiktoken \
+            --hidden-import tiktoken_ext.openai_public \
+            --hidden-import tiktoken_ext \
+            --hidden-import psycopg2 \
+            --hidden-import aiohttp \
+            --hidden-import aiosmtplib \
+            --hidden-import dotenv \
+            --hidden-import email_validator \
+            desktop/entry.py
+
+      - name: Place sidecar binary
+        shell: bash
+        run: |
+          mkdir -p desktop/src-tauri/binaries
+          cp dist/${{ matrix.pyinstaller_name }} desktop/src-tauri/binaries/${{ matrix.sidecar_name }}
+
+      # ── Node + Rust: build Tauri desktop app ──
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -95,14 +162,12 @@ jobs:
         shell: bash
         run: |
           cd desktop/src-tauri
-          # Update version in tauri.conf.json
           node -e "
             const fs = require('fs');
             const conf = JSON.parse(fs.readFileSync('tauri.conf.json', 'utf8'));
             conf.version = '${{ inputs.version }}';
             fs.writeFileSync('tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
           "
-          # Update version in Cargo.toml
           sed -i.bak 's/^version = ".*"/version = "${{ inputs.version }}"/' Cargo.toml
           rm -f Cargo.toml.bak
 
@@ -118,8 +183,12 @@ jobs:
           releaseBody: |
             Desktop application for Aether AI API Gateway.
 
-            **First launch:** Enter your Aether backend URL to connect.
-            **Change server:** Use the menu bar → Aether → Change Server URL.
+            **Prerequisites:** PostgreSQL and Redis must be accessible.
+
+            **Configuration:** Set environment variables before launching:
+            - `DATABASE_URL` — PostgreSQL connection string
+            - `REDIS_URL` — Redis connection string
+            - `ADMIN_PASSWORD` — Initial admin password
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: ${{ matrix.target != '' && format('--target {0}', matrix.target) || '' }}

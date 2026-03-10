@@ -6,10 +6,8 @@
   <title>Aether</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-        'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
       background: #0a0a0a;
       color: #e5e5e5;
       height: 100vh;
@@ -19,14 +17,7 @@
       -webkit-user-select: none;
       user-select: none;
     }
-
-    .container {
-      text-align: center;
-      max-width: 460px;
-      width: 100%;
-      padding: 0 24px;
-    }
-
+    .container { text-align: center; }
     .logo {
       font-size: 42px;
       font-weight: 700;
@@ -36,273 +27,64 @@
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
-
-    .subtitle {
+    .status {
       font-size: 14px;
       color: #737373;
-      margin-bottom: 40px;
+      margin-top: 24px;
     }
-
-    .form-group {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 16px;
+    .spinner {
+      width: 32px;
+      height: 32px;
+      margin: 24px auto 0;
+      border: 3px solid #262626;
+      border-top-color: #60a5fa;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
     }
-
-    input {
-      flex: 1;
-      padding: 12px 16px;
-      background: #171717;
-      border: 1px solid #262626;
-      border-radius: 8px;
-      color: #e5e5e5;
-      font-size: 14px;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-
-    input:focus {
-      border-color: #60a5fa;
-    }
-
-    input::placeholder {
-      color: #525252;
-    }
-
-    button {
-      padding: 12px 24px;
-      background: #2563eb;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background 0.2s;
-      white-space: nowrap;
-    }
-
-    button:hover {
-      background: #1d4ed8;
-    }
-
-    button:disabled {
-      background: #1e3a5f;
-      cursor: not-allowed;
-    }
-
-    .status {
-      font-size: 13px;
-      min-height: 20px;
-      margin-bottom: 24px;
-    }
-
-    .status.error { color: #ef4444; }
-    .status.success { color: #22c55e; }
-    .status.checking { color: #60a5fa; }
-
-    .history {
-      text-align: left;
-    }
-
-    .history h3 {
-      font-size: 12px;
-      color: #525252;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 8px;
-    }
-
-    .history-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 12px;
-      background: #171717;
-      border: 1px solid #262626;
-      border-radius: 6px;
-      margin-bottom: 6px;
-      cursor: pointer;
-      transition: border-color 0.2s;
-    }
-
-    .history-item:hover {
-      border-color: #404040;
-    }
-
-    .history-item .url {
-      font-size: 13px;
-      color: #a3a3a3;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      flex: 1;
-    }
-
-    .history-item .remove {
-      color: #525252;
-      font-size: 18px;
-      padding: 0 4px;
-      cursor: pointer;
-      line-height: 1;
-    }
-
-    .history-item .remove:hover {
-      color: #ef4444;
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error { color: #ef4444; }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="logo">Aether</div>
-    <div class="subtitle">AI API Gateway</div>
-
-    <form id="connect-form">
-      <div class="form-group">
-        <input
-          type="url"
-          id="server-url"
-          placeholder="https://your-aether-server.com"
-          required
-          autofocus
-        />
-        <button type="submit" id="connect-btn">Connect</button>
-      </div>
-    </form>
-    <div class="status" id="status"></div>
-
-    <div class="history" id="history-section" style="display: none;">
-      <h3>Recent Servers</h3>
-      <div id="history-list"></div>
-    </div>
+    <div class="spinner" id="spinner"></div>
+    <div class="status" id="status">Starting service...</div>
   </div>
-
   <script>
-    const STORAGE_KEY = 'aether_server_url';
-    const HISTORY_KEY = 'aether_server_history';
-
-    const urlInput = document.getElementById('server-url');
-    const connectBtn = document.getElementById('connect-btn');
     const statusEl = document.getElementById('status');
-    const historySection = document.getElementById('history-section');
-    const historyList = document.getElementById('history-list');
+    const spinnerEl = document.getElementById('spinner');
+    let dots = 0;
 
-    // Auto-connect if URL is saved (unless user came back to change it)
-    const params = new URLSearchParams(window.location.search);
-    if (!params.has('settings')) {
-      const savedUrl = localStorage.getItem(STORAGE_KEY);
-      if (savedUrl) {
-        showStatus('connecting', `Connecting to ${savedUrl}...`);
-        connectToServer(savedUrl, true);
+    const dotInterval = setInterval(() => {
+      dots = (dots + 1) % 4;
+      statusEl.textContent = 'Starting service' + '.'.repeat(dots);
+    }, 500);
+
+    // Poll backend health (Rust side also handles navigation, this is a fallback)
+    async function pollBackend() {
+      for (let i = 0; i < 120; i++) {
+        try {
+          const resp = await fetch('http://127.0.0.1:8084/health', {
+            signal: AbortSignal.timeout(2000)
+          });
+          if (resp.ok) {
+            clearInterval(dotInterval);
+            statusEl.textContent = 'Connected!';
+            setTimeout(() => {
+              window.location.replace('http://127.0.0.1:8084');
+            }, 300);
+            return;
+          }
+        } catch {}
+        await new Promise(r => setTimeout(r, 1000));
       }
+      clearInterval(dotInterval);
+      spinnerEl.style.display = 'none';
+      statusEl.className = 'status error';
+      statusEl.textContent = 'Failed to start service. Check DATABASE_URL and REDIS_URL.';
     }
-
-    // Render history
-    renderHistory();
-
-    // Form submit
-    document.getElementById('connect-form').addEventListener('submit', (e) => {
-      e.preventDefault();
-      const url = normalizeUrl(urlInput.value);
-      if (!url) return;
-      urlInput.value = url;
-      connectToServer(url, false);
-    });
-
-    function normalizeUrl(raw) {
-      let url = raw.trim().replace(/\/+$/, '');
-      if (!url) return '';
-      if (!/^https?:\/\//i.test(url)) {
-        url = 'http://' + url;
-      }
-      return url;
-    }
-
-    async function connectToServer(url, isAutoConnect) {
-      connectBtn.disabled = true;
-      showStatus('checking', 'Checking server...');
-
-      try {
-        const resp = await fetch(url + '/health', {
-          method: 'GET',
-          signal: AbortSignal.timeout(8000),
-        });
-
-        if (resp.ok) {
-          showStatus('success', 'Connected! Redirecting...');
-          localStorage.setItem(STORAGE_KEY, url);
-          addToHistory(url);
-          setTimeout(() => { window.location.href = url; }, 300);
-        } else {
-          throw new Error(`HTTP ${resp.status}`);
-        }
-      } catch (err) {
-        if (isAutoConnect) {
-          // Auto-connect failed, show the form
-          showStatus('error', `Cannot reach ${url}`);
-          urlInput.value = url;
-        } else {
-          showStatus('error', `Cannot connect: ${err.message}`);
-        }
-        connectBtn.disabled = false;
-      }
-    }
-
-    function showStatus(type, msg) {
-      statusEl.className = 'status ' + type;
-      statusEl.textContent = msg;
-    }
-
-    function getHistory() {
-      try {
-        return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
-      } catch {
-        return [];
-      }
-    }
-
-    function addToHistory(url) {
-      let history = getHistory().filter(u => u !== url);
-      history.unshift(url);
-      history = history.slice(0, 5);
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-    }
-
-    function removeFromHistory(url) {
-      const history = getHistory().filter(u => u !== url);
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
-      if (localStorage.getItem(STORAGE_KEY) === url) {
-        localStorage.removeItem(STORAGE_KEY);
-      }
-      renderHistory();
-    }
-
-    function renderHistory() {
-      const history = getHistory();
-      if (history.length === 0) {
-        historySection.style.display = 'none';
-        return;
-      }
-      historySection.style.display = 'block';
-      historyList.innerHTML = '';
-      history.forEach(url => {
-        const item = document.createElement('div');
-        item.className = 'history-item';
-        item.innerHTML = `
-          <span class="url">${url}</span>
-          <span class="remove" title="Remove">&times;</span>
-        `;
-        item.querySelector('.url').addEventListener('click', () => {
-          urlInput.value = url;
-          connectToServer(url, false);
-        });
-        item.querySelector('.remove').addEventListener('click', (e) => {
-          e.stopPropagation();
-          removeFromHistory(url);
-        });
-        historyList.appendChild(item);
-      });
-    }
+    pollBackend();
   </script>
 </body>
 </html>

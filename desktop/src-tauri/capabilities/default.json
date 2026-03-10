@@ -3,6 +3,15 @@
   "description": "Default capabilities for Aether Desktop",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "binaries/aether-server",
+          "sidecar": true
+        }
+      ]
+    }
   ]
 }

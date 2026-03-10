@@ -7,15 +7,7 @@
     "frontendDist": "../ui"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Aether",
-        "width": 1280,
-        "height": 800,
-        "center": true,
-        "resizable": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: data: blob:; connect-src * ws: wss:; img-src * data: blob:; font-src * data:; style-src * 'unsafe-inline'; script-src * 'unsafe-inline' 'unsafe-eval'; frame-src *"
     }

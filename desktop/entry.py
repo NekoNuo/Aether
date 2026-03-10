@@ -2,10 +2,27 @@
 
 This script is used by PyInstaller to create a standalone executable.
 It starts the FastAPI backend and serves the built frontend as static files.
+Configuration is loaded from a .env file passed via --env-file argument.
 """
 
 import os
 import sys
+
+
+def load_env_file(path):
+    """Load environment variables from a .env file."""
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip("'\"")
+                os.environ.setdefault(key, value)
 
 
 def main():
@@ -17,6 +34,15 @@ def main():
 
     sys.path.insert(0, base_path)
     os.chdir(base_path)
+
+    # Load .env file from --env-file argument or default location
+    env_file = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--env-file" and i + 1 < len(sys.argv):
+            env_file = sys.argv[i + 1]
+            break
+    if env_file:
+        load_env_file(env_file)
 
     # Import the FastAPI app
     from src.main import app

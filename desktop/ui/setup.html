@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aether - Setup</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
+      background: #0a0a0a;
+      color: #e5e5e5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .container { max-width: 520px; width: 100%; padding: 0 24px; }
+    .logo {
+      font-size: 42px; font-weight: 700; letter-spacing: -1px;
+      text-align: center; margin-bottom: 4px;
+      background: linear-gradient(135deg, #60a5fa, #a78bfa);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .subtitle { text-align: center; font-size: 14px; color: #737373; margin-bottom: 32px; }
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-size: 13px; color: #a3a3a3; margin-bottom: 6px; font-weight: 500; }
+    .required::after { content: ' *'; color: #ef4444; }
+    input {
+      width: 100%; padding: 10px 14px; background: #171717; border: 1px solid #262626;
+      border-radius: 8px; color: #e5e5e5; font-size: 14px; outline: none;
+      font-family: 'SF Mono', 'Fira Code', monospace; transition: border-color 0.2s;
+    }
+    input:focus { border-color: #60a5fa; }
+    input::placeholder { color: #525252; }
+    .hint { font-size: 12px; color: #525252; margin-top: 4px; }
+    .divider { border: none; border-top: 1px solid #1a1a1a; margin: 24px 0; }
+    button {
+      width: 100%; padding: 12px; background: #2563eb; color: #fff; border: none;
+      border-radius: 8px; font-size: 15px; font-weight: 500; cursor: pointer;
+      transition: background 0.2s; margin-top: 8px;
+    }
+    button:hover { background: #1d4ed8; }
+    button:disabled { background: #1e3a5f; cursor: not-allowed; }
+    .status { text-align: center; font-size: 13px; margin-top: 12px; min-height: 20px; }
+    .status.error { color: #ef4444; }
+    .status.success { color: #22c55e; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">Aether</div>
+    <div class="subtitle">Initial Configuration</div>
+
+    <form id="setup-form">
+      <div class="form-group">
+        <label class="required">DATABASE_URL</label>
+        <input type="text" id="database_url" placeholder="postgresql://user:pass@localhost:5432/aether" required />
+        <div class="hint">PostgreSQL connection string</div>
+      </div>
+
+      <div class="form-group">
+        <label class="required">REDIS_URL</label>
+        <input type="text" id="redis_url" placeholder="redis://:password@localhost:6379/0" required />
+        <div class="hint">Redis connection string</div>
+      </div>
+
+      <hr class="divider" />
+
+      <div class="form-group">
+        <label>ADMIN_PASSWORD</label>
+        <input type="password" id="admin_password" placeholder="Admin password (optional)" />
+        <div class="hint">Initial admin account password</div>
+      </div>
+
+      <div class="form-group">
+        <label>JWT_SECRET_KEY</label>
+        <input type="text" id="jwt_secret" placeholder="Auto-generated if empty" />
+        <div class="hint">Token signing key (leave empty for auto-generation)</div>
+      </div>
+
+      <div class="form-group">
+        <label>PORT</label>
+        <input type="number" id="port" placeholder="8084" value="8084" />
+      </div>
+
+      <button type="submit" id="save-btn">Save &amp; Start</button>
+    </form>
+    <div class="status" id="status"></div>
+  </div>
+
+  <script>
+    const { invoke } = window.__TAURI__.core;
+
+    // Load existing config if any
+    (async () => {
+      try {
+        const content = await invoke('load_config');
+        if (content) {
+          const lines = content.split('\n');
+          for (const line of lines) {
+            const [key, ...rest] = line.split('=');
+            const value = rest.join('=').trim();
+            const map = {
+              'DATABASE_URL': 'database_url',
+              'REDIS_URL': 'redis_url',
+              'ADMIN_PASSWORD': 'admin_password',
+              'JWT_SECRET_KEY': 'jwt_secret',
+              'PORT': 'port',
+            };
+            const el = document.getElementById(map[key.trim()]);
+            if (el && value) el.value = value;
+          }
+        }
+      } catch {}
+    })();
+
+    document.getElementById('setup-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const statusEl = document.getElementById('status');
+      const btn = document.getElementById('save-btn');
+      btn.disabled = true;
+      statusEl.className = 'status';
+      statusEl.textContent = 'Saving...';
+
+      const lines = [];
+      const dbUrl = document.getElementById('database_url').value.trim();
+      const redisUrl = document.getElementById('redis_url').value.trim();
+      const adminPw = document.getElementById('admin_password').value.trim();
+      const jwtSecret = document.getElementById('jwt_secret').value.trim();
+      const port = document.getElementById('port').value.trim() || '8084';
+
+      if (!dbUrl || !redisUrl) {
+        statusEl.className = 'status error';
+        statusEl.textContent = 'DATABASE_URL and REDIS_URL are required';
+        btn.disabled = false;
+        return;
+      }
+
+      lines.push(`DATABASE_URL=${dbUrl}`);
+      lines.push(`REDIS_URL=${redisUrl}`);
+      if (adminPw) lines.push(`ADMIN_PASSWORD=${adminPw}`);
+      if (jwtSecret) lines.push(`JWT_SECRET_KEY=${jwtSecret}`);
+      lines.push(`PORT=${port}`);
+
+      try {
+        await invoke('save_config', { config: lines.join('\n') });
+        statusEl.className = 'status success';
+        statusEl.textContent = 'Configuration saved. Starting backend...';
+
+        await invoke('start_backend');
+
+        // Poll backend health and redirect
+        for (let i = 0; i < 120; i++) {
+          try {
+            const resp = await fetch(`http://127.0.0.1:${port}/health`, {
+              signal: AbortSignal.timeout(2000)
+            });
+            if (resp.ok) {
+              window.location.replace(`http://127.0.0.1:${port}`);
+              return;
+            }
+          } catch {}
+          await new Promise(r => setTimeout(r, 1000));
+        }
+        statusEl.className = 'status error';
+        statusEl.textContent = 'Backend failed to start. Check your configuration.';
+      } catch (err) {
+        statusEl.className = 'status error';
+        statusEl.textContent = 'Error: ' + err;
+      }
+      btn.disabled = false;
+    });
+  </script>
+</body>
+</html>

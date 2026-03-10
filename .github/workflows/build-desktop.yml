@@ -47,11 +47,6 @@ jobs:
             rust_targets: 'aarch64-apple-darwin'
             pyinstaller_name: aether-server
             sidecar_name: aether-server-aarch64-apple-darwin
-          - platform: macos-13
-            target: x86_64-apple-darwin
-            rust_targets: 'x86_64-apple-darwin'
-            pyinstaller_name: aether-server
-            sidecar_name: aether-server-x86_64-apple-darwin
           - platform: ubuntu-22.04
             target: ''
             rust_targets: ''
@@ -88,13 +83,21 @@ jobs:
           pip install -e ".[all]" 2>/dev/null || pip install -e .
         shell: bash
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Build frontend for embedding
         working-directory: frontend
+        env:
+          VITE_API_URL: http://127.0.0.1:8084
         run: |
           npm ci
-          VITE_API_URL=http://127.0.0.1:8084 npm run build
+          npm run build
 
-      - name: Build backend with PyInstaller
+      - name: Build backend with PyInstaller (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           pyinstaller --onefile \
@@ -124,18 +127,44 @@ jobs:
             --hidden-import email_validator \
             desktop/entry.py
 
+      - name: Build backend with PyInstaller (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          pyinstaller --onefile \
+            --name aether-server \
+            --add-data "src;src" \
+            --add-data "frontend/dist;frontend_dist" \
+            --collect-submodules uvicorn \
+            --collect-submodules sqlalchemy \
+            --collect-submodules pydantic \
+            --collect-submodules starlette \
+            --collect-submodules fastapi \
+            --collect-submodules httpx \
+            --collect-submodules asyncpg \
+            --collect-submodules cryptography \
+            --collect-submodules bcrypt \
+            --collect-submodules openai \
+            --collect-submodules loguru \
+            --collect-submodules apscheduler \
+            --collect-submodules prometheus_client \
+            --collect-submodules tiktoken \
+            --hidden-import tiktoken_ext.openai_public \
+            --hidden-import tiktoken_ext \
+            --hidden-import psycopg2 \
+            --hidden-import aiohttp \
+            --hidden-import aiosmtplib \
+            --hidden-import dotenv \
+            --hidden-import email_validator \
+            desktop/entry.py
+
       - name: Place sidecar binary
         shell: bash
         run: |
           mkdir -p desktop/src-tauri/binaries
           cp dist/${{ matrix.pyinstaller_name }} desktop/src-tauri/binaries/${{ matrix.sidecar_name }}
 
-      # ── Node + Rust: build Tauri desktop app ──
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
+      # ── Rust: build Tauri desktop app ──
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
